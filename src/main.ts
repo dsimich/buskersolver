@@ -1,5 +1,11 @@
 import { Args } from "grimoire-kolmafia";
-import { findTopBusksFast, printBuskResult } from "./utils";
+import {
+  Busk,
+  equipBuskOutfit,
+  findTopBusksFast,
+  printBuskResult,
+  reconstructOutfit,
+} from "./utils";
 import { Effect, Modifier, print, toEffect, toModifier } from "kolmafia";
 import { $effects, sinceKolmafiaRevision } from "libram";
 
@@ -21,6 +27,10 @@ export const args = Args.create("Beret_Busk_Tester", "Be good, be kind", {
   }),
   checkhammertime: Args.boolean({
     help: `Pretend we have effect hammertime to widen the pants scope`,
+    default: false,
+  }),
+  equipOutfit: Args.boolean({
+    help: "Equip the outfit for the determined best busk (or specified busk).",
     default: false,
   }),
 });
@@ -74,4 +84,40 @@ export function main(command?: string): void {
     result,
     weightedModifiers.map(([m]) => m)
   );
+
+  if (args.equipOutfit && result && result.busks.length > 0) {
+    let buskToEquipFor: Busk | undefined = undefined;
+
+    // Sort busks by index to ensure consistent selection
+    const busksSortedByIndex = [...result.busks].sort((a, b) => a.buskIndex - b.buskIndex);
+
+    if (args.busk !== undefined) {
+      // User specified a busk number
+      buskToEquipFor = busksSortedByIndex.find((b) => b.buskIndex === (args.busk as number) - 1);
+      if (!buskToEquipFor) {
+        print(
+          `Could not find data for busk ${args.busk} to equip. Ensure it's an available busk number.`,
+          "red"
+        );
+      }
+    } else {
+      // No specific busk chosen, pick the first available (lowest index)
+      if (busksSortedByIndex.length > 0) {
+        buskToEquipFor = busksSortedByIndex[0];
+      }
+    }
+
+    if (buskToEquipFor) {
+      print(
+        `Equipping outfit for Busk ${buskToEquipFor.buskIndex + 1} (Power ${
+          buskToEquipFor.daRaw
+        })...`,
+        "blue"
+      );
+      const { hat, shirt, pants } = reconstructOutfit(buskToEquipFor.daRaw);
+      equipBuskOutfit(hat, shirt, pants);
+    } else if (args.busk === undefined && busksSortedByIndex.length === 0) {
+      print("No busks found in results to equip for.", "yellow");
+    }
+  }
 }
