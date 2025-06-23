@@ -2,24 +2,29 @@ import {
   beretBuskingEffects,
   canEquip,
   Effect,
+  equip, // Added
   getPower,
+  equippedAmount, // Added
   Item,
+  equippedItem, // Added
   Modifier,
+  myPath,
   npcPrice,
   numericModifier,
   print,
   toEffect,
   toInt,
+  Slot, // Added
   toSlot,
 } from "kolmafia";
-import { $effect, $familiar, $item, $skill, $slot, clamp, get, have, sum } from "libram";
+import { $effect, $familiar, $item, $path, $skill, $slot, clamp, get, have, sum } from "libram";
 import { args } from "./main";
 
 export interface Busk {
   effects: Effect[];
   score: number;
   buskIndex: number;
-  daRaw: number;
+  daRaw: number; // Damage Absorption Raw Power
 }
 
 export interface BuskResult {
@@ -121,21 +126,73 @@ export function findTopBusksFast(
   return { score: totalScore, busks: topBusks };
 }
 
-function reconstructOutfit(daRaw: number): { hat?: Item; shirt?: Item; pants?: Item } {
-  for (const hat of allHats) {
-    const hatPower = multipliers()[0] * getPower(hat);
+export function reconstructOutfit(daRaw: number): { hat?: Item; shirt?: Item; pants?: Item } {
+  const [taoHatMultiplier, totalPantsMultiplier] = multipliers();
+  const onHatTrickPath = myPath() === $path`Hat Trick`;
+  // allHats, allShirts, allPants are items we have() or can buy from NPC shops, and canEquip()
+
+  if (onHatTrickPath) {
+    let actualEquippedHatBasePower = 0;
+    // Sum power of all currently equipped hats.
+    // `allItems` includes items we `have()` and `canEquip()`, plus `npcPrice > 0 && canEquip()` items.
+    // `equippedAmount(item)` will be 0 for unowned shop items, so this correctly sums
+    // power only from hats that are genuinely equipped (implying we have them).
+    for (const item of allItems) {
+      if (toSlot(item) === $slot`hat` && equippedAmount(item) > 0) {
+        actualEquippedHatBasePower += getPower(item);
+      }
+    }
+    const actualEquippedHatPowerContribution = taoHatMultiplier * actualEquippedHatBasePower;
+
+    // Candidate hats to add: from allHats (items we have/can buy & can equip),
+    // and are not currently equipped (i.e., equippedAmount === 0).
+    const candidateHatsToAdd = allHats.filter((h) => equippedAmount(h) === 0);
+
     for (const shirt of allShirts) {
       const shirtPower = getPower(shirt);
       for (const pants of allPants) {
-        const pantsPower = multipliers()[1] * getPower(pants);
-        if (shirtPower + hatPower + pantsPower === daRaw) {
-          return { hat, shirt, pants };
+        const pantsPower = totalPantsMultiplier * getPower(pants);
+
+        // Scenario 1: Check if daRaw matches with an *additional* hat
+        for (const hatToAdd of candidateHatsToAdd) {
+          const additionalHatPowerContribution = taoHatMultiplier * getPower(hatToAdd);
+          if (
+            actualEquippedHatPowerContribution +
+              additionalHatPowerContribution +
+              shirtPower +
+              pantsPower ===
+            daRaw
+          ) {
+            // This daRaw was formed by adding 'hatToAdd'
+            return { hat: hatToAdd, shirt, pants };
+          }
+        }
+
+        // Scenario 2: Check if daRaw matches with *only* currently equipped hats (no new hat added)
+        if (actualEquippedHatPowerContribution + shirtPower + pantsPower === daRaw) {
+          // This daRaw was formed without adding a new hat.
+          // 'hat' property remains undefined.
+          return { shirt, pants };
         }
       }
     }
+    return {}; // Should ideally find a match if daRaw was generated correctly
+  } else {
+    // Original logic for non-Hat Trick paths
+    for (const hat of allHats) {
+      const hatPower = taoHatMultiplier * getPower(hat);
+      for (const shirt of allShirts) {
+        const shirtPower = getPower(shirt);
+        for (const pants of allPants) {
+          const pantsPower = totalPantsMultiplier * getPower(pants);
+          if (shirtPower + hatPower + pantsPower === daRaw) {
+            return { hat, shirt, pants };
+          }
+        }
+      }
+    }
+    return {};
   }
-
-  return {};
 }
 
 export function printBuskResult(result: BuskResult | null, modifiers: Modifier[]): void {
@@ -146,6 +203,7 @@ export function printBuskResult(result: BuskResult | null, modifiers: Modifier[]
 
   print(`Score: ${result.score}`);
   print("\nBusk Info:");
+  const onHatTrickPath = myPath() === $path`Hat Trick`;
 
   const bestBusksByIndex = new Map<number, Busk>();
   for (const busk of result.busks) {
@@ -167,34 +225,115 @@ export function printBuskResult(result: BuskResult | null, modifiers: Modifier[]
       .join(", ");
     print(`Power ${daRaw} Busk ${buskIndex + 1}, Effects: ${effectNames}, ${modifierValues}`);
 
-    const { hat, shirt, pants } = reconstructOutfit(daRaw);
-    print(
-      `  - Equipment: Hat = ${hat?.name ?? "?"}, Shirt = ${shirt?.name ?? "?"}, Pants = ${
-        pants?.name ?? "?"
-      }`
-    );
-    print("    ");
+    if (onHatTrickPath) {
+      const { hat, shirt, pants } = reconstructOutfit(daRaw);
+      if (hat) {
+        // A hat is being added/suggested
+        print(
+          `  - Equipment: Hat = ${hat.name}, Shirt = ${shirt?.name ?? "?"}, Pants = ${
+            pants?.name ?? "?"
+          }`
+        );
+      } else {
+        // No hat is being added, only shirt and pants (hats are implicitly the already equipped ones)
+        print(`  - Equipment: Shirt = ${shirt?.name ?? "?"}, Pants = ${pants?.name ?? "?"}`);
+      }
+    } else {
+      const { hat, shirt, pants } = reconstructOutfit(daRaw);
+      print(
+        `  - Equipment: Hat = ${hat?.name ?? "?"}, Shirt = ${shirt?.name ?? "?"}, Pants = ${
+          pants?.name ?? "?"
+        }`
+      );
+    }
+    print("    "); // Extra newline for spacing
   }
 }
 
-const allItems = Item.all().filter((i) => have(i) && canEquip(i));
-const shopItems = Item.all().filter((i) => npcPrice(i) > 0 && canEquip(i));
-allItems.push(...shopItems);
-const allHats = have($familiar`Mad Hatrack`)
+export function equipBuskOutfit(hat?: Item, shirt?: Item, pants?: Item): void {
+  const itemsToEquip: [Slot, Item | undefined][] = [
+    [$slot`hat`, hat],
+    [$slot`shirt`, shirt],
+    [$slot`pants`, pants],
+  ];
+
+  for (const [slot, item] of itemsToEquip) {
+    if (item) {
+      // Check if the item is already equipped in the target slot
+      if (equippedItem(slot) !== item) {
+        print(`Equipping ${item.name} in ${slot.toString()}...`, "green");
+        if (!equip(slot, item)) {
+          print(
+            `Failed to equip ${
+              item.name
+            } in ${slot.toString()}. You may not have the item or cannot equip it.`,
+            "red"
+          );
+        }
+      } else {
+        print(`${item.name} is already equipped in ${slot.toString()}.`, "gray");
+      }
+    }
+    // If item is undefined, we don't unequip the slot.
+    // This is important for Hat Trick path where an undefined hat means "use currently equipped hats".
+  }
+}
+
+// allItems represents all items we could potentially equip.
+// We only consider items that are currently in inventory and can be equipped.
+const allItems: Item[] = Item.all().filter((i) => (have(i) || npcPrice(i) > 0) && canEquip(i));
+
+export const allHats = have($familiar`Mad Hatrack`)
   ? allItems.filter((i) => toSlot(i) === $slot`hat`)
   : [beret];
-const allPants = allItems.filter((i) => toSlot(i) === $slot`pants`);
-const allShirts = allItems.filter((i) => toSlot(i) === $slot`shirt`);
+export const allPants = allItems.filter((i) => toSlot(i) === $slot`pants`);
+export const allShirts = allItems.filter((i) => toSlot(i) === $slot`shirt`);
 
 function beretPowerSum(): number[] {
-  const hats = [...new Set(allHats.map((i) => multipliers()[0] * getPower(i)))];
+  const [hatMultiplier, pantsMultiplier] = multipliers();
+  let hatPowerContributions: number[]; // Represents the total power contribution from hats for a given scenario
 
-  const pants = [...new Set(allPants.map((i) => multipliers()[1] * getPower(i)))];
-  const shirts = [...new Set(allShirts.map((i) => getPower(i)))];
+  if (myPath() === $path`Hat Trick`) {
+    // On Hat Trick, calculate base power from currently equipped hats.
+    let totalEquippedHatBasePower = 0;
+    for (const item of allItems) {
+      if (toSlot(item) === $slot`hat` && equippedAmount(item) > 0) {
+        totalEquippedHatBasePower += getPower(item);
+      }
+    }
+    const baseEquippedHatPowerContribution = hatMultiplier * totalEquippedHatBasePower;
+
+    // Candidate hats to add: from allHats (items we have or can buy, and canEquip),
+    // and are not currently equipped (i.e., equippedAmount === 0).
+    const candidateHatsToAdd = allHats.filter((h) => equippedAmount(h) === 0);
+
+    const uniqueHatPowerContributions = new Set<number>();
+
+    // Scenario 1: Using only currently equipped hats (no additional hat is actively chosen here to add to base)
+    uniqueHatPowerContributions.add(baseEquippedHatPowerContribution);
+
+    // Scenario 2: Adding one additional unequipped hat from candidates to the base power
+    for (const hatToAdd of candidateHatsToAdd) {
+      uniqueHatPowerContributions.add(
+        baseEquippedHatPowerContribution + hatMultiplier * getPower(hatToAdd)
+      );
+    }
+    hatPowerContributions = Array.from(uniqueHatPowerContributions);
+  } else {
+    // Standard behavior: consider all available hats individually
+    hatPowerContributions = [...new Set(allHats.map((i) => hatMultiplier * getPower(i)))];
+  }
+
+  const pantsPowers = [...new Set(allPants.map((i) => pantsMultiplier * getPower(i)))];
+  const shirtPowers = [...new Set(allShirts.map((i) => getPower(i)))];
 
   return [
     ...new Set(
-      hats.flatMap((hat) => pants.flatMap((pant) => shirts.flatMap((shirt) => hat + pant + shirt)))
+      hatPowerContributions.flatMap((hatPContribution) =>
+        pantsPowers.flatMap((pantP) =>
+          shirtPowers.flatMap((shirtP) => hatPContribution + pantP + shirtP)
+        )
+      )
     ),
   ];
 }
