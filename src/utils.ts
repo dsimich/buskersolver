@@ -9,7 +9,6 @@ import {
   equippedItem, // Added
   Modifier,
   myPath,
-  npcPrice,
   numericModifier,
   print,
   toEffect,
