@@ -2,11 +2,11 @@ import {
   beretBuskingEffects,
   canEquip,
   Effect,
-  equip, // Added
+  equip,
   getPower,
-  equippedAmount, // Added
+  equippedAmount,
   Item,
-  equippedItem, // Added
+  equippedItem,
   Modifier,
   myPath,
   npcPrice,
@@ -14,7 +14,7 @@ import {
   print,
   toEffect,
   toInt,
-  Slot, // Added
+  Slot,
   toSlot,
 } from "kolmafia";
 import { $effect, $familiar, $item, $path, $skill, $slot, clamp, get, have, sum } from "libram";
@@ -24,13 +24,15 @@ export interface Busk {
   effects: Effect[];
   score: number;
   buskIndex: number;
-  daRaw: number; // Damage Absorption Raw Power
+  daRaw: number;
 }
 
 export interface BuskResult {
   score: number;
   busks: Busk[];
 }
+
+const onHatTrickPath = myPath() === $path`Hat Trick`;
 
 // eslint-disable-next-line libram/verify-constants
 const beret = $item`prismatic beret`;
@@ -128,8 +130,6 @@ export function findTopBusksFast(
 
 export function reconstructOutfit(daRaw: number): { hat?: Item; shirt?: Item; pants?: Item } {
   const [taoHatMultiplier, totalPantsMultiplier] = multipliers();
-  const onHatTrickPath = myPath() === $path`Hat Trick`;
-  // allHats, allShirts, allPants are items we have() or can buy from NPC shops, and canEquip()
 
   if (onHatTrickPath) {
     let actualEquippedHatBasePower = 0;
@@ -203,8 +203,6 @@ export function printBuskResult(result: BuskResult | null, modifiers: Modifier[]
 
   print(`Score: ${result.score}`);
   print("\nBusk Info:");
-  const onHatTrickPath = myPath() === $path`Hat Trick`;
-
   const bestBusksByIndex = new Map<number, Busk>();
   for (const busk of result.busks) {
     const existing = bestBusksByIndex.get(busk.buskIndex);
@@ -293,7 +291,7 @@ function beretPowerSum(): number[] {
   const [hatMultiplier, pantsMultiplier] = multipliers();
   let hatPowerContributions: number[]; // Represents the total power contribution from hats for a given scenario
 
-  if (myPath() === $path`Hat Trick`) {
+  if (onHatTrickPath) {
     // On Hat Trick, calculate base power from currently equipped hats.
     let totalEquippedHatBasePower = 0;
     for (const item of allItems) {
