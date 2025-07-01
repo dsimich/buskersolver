@@ -114,8 +114,8 @@ export function main(command?: string): void {
         })...`,
         "blue"
       );
-      const { hat, shirt, pants } = reconstructOutfit(buskToEquipFor.daRaw);
-      equipBuskOutfit(hat, shirt, pants);
+      const { hats, shirt, pants } = reconstructOutfit(buskToEquipFor.daRaw);
+      equipBuskOutfit(hats, shirt, pants);
     } else if (args.busk === undefined && busksSortedByIndex.length === 0) {
       print("No busks found in results to equip for.", "yellow");
     }

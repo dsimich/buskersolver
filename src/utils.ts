@@ -128,7 +128,7 @@ export function findTopBusksFast(
   return { score: totalScore, busks: topBusks };
 }
 
-export function reconstructOutfit(daRaw: number): { hat?: Item; shirt?: Item; pants?: Item } {
+export function reconstructOutfit(daRaw: number): { hats?: Item[]; shirt?: Item; pants?: Item } {
   const [taoHatMultiplier, totalPantsMultiplier] = multipliers();
 
   if (onHatTrickPath) {
@@ -147,25 +147,24 @@ export function reconstructOutfit(daRaw: number): { hat?: Item; shirt?: Item; pa
     // Candidate hats to add: from allHats (items we have/can buy & can equip),
     // and are not currently equipped (i.e., equippedAmount === 0).
     const candidateHatsToAdd = allHats.filter((h) => equippedAmount(h) === 0);
+    const maxPotentialHatPowerToAdd = sum(candidateHatsToAdd, (hat) => getPower(hat));
+    const additionalHatPowerContribution = taoHatMultiplier * maxPotentialHatPowerToAdd;
 
     for (const shirt of allShirts) {
       const shirtPower = getPower(shirt);
       for (const pants of allPants) {
         const pantsPower = totalPantsMultiplier * getPower(pants);
 
-        // Scenario 1: Check if daRaw matches with an *additional* hat
-        for (const hatToAdd of candidateHatsToAdd) {
-          const additionalHatPowerContribution = taoHatMultiplier * getPower(hatToAdd);
-          if (
-            actualEquippedHatPowerContribution +
-              additionalHatPowerContribution +
-              shirtPower +
-              pantsPower ===
+        // Scenario 1: Check if daRaw matches with ALL additional hats
+        if (
+          additionalHatPowerContribution > 0 &&
+          actualEquippedHatPowerContribution +
+            additionalHatPowerContribution +
+            shirtPower +
+            pantsPower ===
             daRaw
-          ) {
-            // This daRaw was formed by adding 'hatToAdd'
-            return { hat: hatToAdd, shirt, pants };
-          }
+        ) {
+          return { hats: candidateHatsToAdd, shirt, pants };
         }
 
         // Scenario 2: Check if daRaw matches with *only* currently equipped hats (no new hat added)
@@ -186,7 +185,7 @@ export function reconstructOutfit(daRaw: number): { hat?: Item; shirt?: Item; pa
         for (const pants of allPants) {
           const pantsPower = totalPantsMultiplier * getPower(pants);
           if (shirtPower + hatPower + pantsPower === daRaw) {
-            return { hat, shirt, pants };
+            return { hats: [hat], shirt, pants };
           }
         }
       }
@@ -224,22 +223,22 @@ export function printBuskResult(result: BuskResult | null, modifiers: Modifier[]
     print(`Power ${daRaw} Busk ${buskIndex + 1}, Effects: ${effectNames}, ${modifierValues}`);
 
     if (onHatTrickPath) {
-      const { hat, shirt, pants } = reconstructOutfit(daRaw);
-      if (hat) {
+      const { hats, shirt, pants } = reconstructOutfit(daRaw);
+      if (hats && hats.length > 0) {
         // A hat is being added/suggested
         print(
-          `  - Equipment: Hat = ${hat.name}, Shirt = ${shirt?.name ?? "?"}, Pants = ${
-            pants?.name ?? "?"
-          }`
+          `  - Equipment: Hat = ${hats.map((h) => h.name).join(" & ")}, Shirt = ${
+            shirt?.name ?? "?"
+          }, Pants = ${pants?.name ?? "?"}`
         );
       } else {
         // No hat is being added, only shirt and pants (hats are implicitly the already equipped ones)
         print(`  - Equipment: Shirt = ${shirt?.name ?? "?"}, Pants = ${pants?.name ?? "?"}`);
       }
     } else {
-      const { hat, shirt, pants } = reconstructOutfit(daRaw);
+      const { hats, shirt, pants } = reconstructOutfit(daRaw);
       print(
-        `  - Equipment: Hat = ${hat?.name ?? "?"}, Shirt = ${shirt?.name ?? "?"}, Pants = ${
+        `  - Equipment: Hat = ${hats?.[0]?.name ?? "?"}, Shirt = ${shirt?.name ?? "?"}, Pants = ${
           pants?.name ?? "?"
         }`
       );
@@ -248,12 +247,27 @@ export function printBuskResult(result: BuskResult | null, modifiers: Modifier[]
   }
 }
 
-export function equipBuskOutfit(hat?: Item, shirt?: Item, pants?: Item): void {
+export function equipBuskOutfit(hats?: Item[], shirt?: Item, pants?: Item): void {
   const itemsToEquip: [Slot, Item | undefined][] = [
-    [$slot`hat`, hat],
     [$slot`shirt`, shirt],
     [$slot`pants`, pants],
   ];
+
+  if (onHatTrickPath) {
+    if (hats) {
+      const currentHatSlots = Slot.all().filter((s) => toSlot(equippedItem(s)) === $slot`hat`);
+      const currentHatItems = currentHatSlots.map((s) => equippedItem(s));
+      if (
+        hats.length !== currentHatItems.length ||
+        !hats.every((h) => currentHatItems.includes(h))
+      ) {
+        currentHatSlots.forEach((s) => equip(s, $item.none));
+        hats.forEach((h) => equip(h));
+      }
+    }
+  } else if (hats?.length) {
+    itemsToEquip.unshift([$slot`hat`, hats[0]]);
+  }
 
   for (const [slot, item] of itemsToEquip) {
     if (item) {
@@ -304,16 +318,17 @@ function beretPowerSum(): number[] {
     // Candidate hats to add: from allHats (items we have or can buy, and canEquip),
     // and are not currently equipped (i.e., equippedAmount === 0).
     const candidateHatsToAdd = allHats.filter((h) => equippedAmount(h) === 0);
+    const maxPotentialHatPowerToAdd = sum(candidateHatsToAdd, (hat) => getPower(hat));
 
     const uniqueHatPowerContributions = new Set<number>();
 
     // Scenario 1: Using only currently equipped hats (no additional hat is actively chosen here to add to base)
     uniqueHatPowerContributions.add(baseEquippedHatPowerContribution);
 
-    // Scenario 2: Adding one additional unequipped hat from candidates to the base power
-    for (const hatToAdd of candidateHatsToAdd) {
+    // Scenario 2: Adding ALL additional unequipped hats to the base power
+    if (maxPotentialHatPowerToAdd > 0) {
       uniqueHatPowerContributions.add(
-        baseEquippedHatPowerContribution + hatMultiplier * getPower(hatToAdd)
+        baseEquippedHatPowerContribution + hatMultiplier * maxPotentialHatPowerToAdd
       );
     }
     hatPowerContributions = Array.from(uniqueHatPowerContributions);
